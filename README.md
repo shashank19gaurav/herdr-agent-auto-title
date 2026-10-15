@@ -1,17 +1,19 @@
 # Herdr Copilot Auto-Title
 
 A Windows-native Herdr plugin that keeps **all Copilot tabs** named after the
-active Copilot conversation, including after `/resume`. No LLM calls, paid API,
-npm dependencies, user service, or changes to your Copilot hooks.
+active Copilot conversation, including after `/resume`, on Local and enabled
+saved SSH machines. No LLM calls, paid API, npm dependencies, user service,
+or changes to your Copilot hooks.
 
 ## Install
 
 Requires Windows, Herdr **0.9.4+**, Node.js **20+** on Herdr's PATH, and Git.
-Copilot's Herdr integration must report its active session ID:
+Copilot must be recognized by Herdr and emit a meaningful terminal title.
+Install its Herdr integration for session-ID tracking where supported:
 
 ```powershell
 herdr integration install copilot
-herdr plugin install shashank19gaurav/herdr-copilot-auto-title --ref v0.1.0
+herdr plugin install shashank19gaurav/herdr-copilot-auto-title --ref v0.1.1
 herdr plugin action invoke copilot-auto-title.start
 ```
 
@@ -26,16 +28,22 @@ Its terminal shows operational diagnostics without conversation titles.
 
 ## Behavior
 
-- Polls one authoritative `session.snapshot` every two seconds, across all
-  workspaces. Uses `HERDR_BIN_PATH` and argv-based, timed CLI calls; no shell
-  interpolation or assumptions about Windows named-pipe transport.
-- Only agents whose `agent` is exactly `copilot` and which have a native
-  Copilot session ID are eligible. Non-Copilot tabs are untouched.
+- Polls authoritative `session.snapshot` responses across all workspaces,
+  waiting two seconds between completed cycles. Uses `HERDR_BIN_PATH` and
+  argv-based, timed CLI calls; no shell interpolation or assumptions about
+  Windows named-pipe transport.
+- Manages Local and **all enabled saved Herdr SSH machines**, not just the
+  machine selected in the UI. Every remote read/write is explicitly scoped with
+  `--machine <id>`; identical pane/tab IDs on different servers stay isolated.
+- Only agents whose `agent` is exactly `copilot` are eligible. Native session
+  IDs strengthen switch detection when available, but are not required.
+  Non-Copilot tabs are untouched.
 - Reads `terminal_title_stripped`, trims surrounding whitespace and removes
   only the exact trailing ` - GitHub Copilot`. It preserves all other title
   text, including any activity text Copilot includes in its terminal title.
 - Ignores blank, generic, loading, and control-character titles. Requires
-  two consecutive identical observations (normally two to four seconds).
+  two consecutive identical observations (normally two to four seconds locally;
+  SSH adds transport latency).
 - A session ID change invalidates the previous title. An unchanged old title
   is quarantined until the terminal emits a different title or a generic
   reset. Switching back is supported; identities are rechecked before renames.
@@ -48,6 +56,36 @@ Its terminal shows operational diagnostics without conversation titles.
 - New/recreated panes and tabs are discovered automatically. Duplicate
   watchers are prevented with an OS-owned named-pipe singleton per Herdr
   socket; no stale PID files, transcripts, or title database are written.
+
+### SSH machines
+
+Install the plugin **once on your local Windows Herdr**, even if a saved
+machine runs Linux or macOS. The remote needs a running compatible Herdr
+server, but does not need this plugin or Node.js installed.
+
+```powershell
+herdr machine list --json
+herdr machine status "My Devbox" --json
+herdr --machine "My Devbox" agent list
+```
+
+The watcher discovers saved profiles automatically. Each enabled machine has
+its own polling task, title tracker, and reconnect backoff. An offline or slow
+device does not stall local titles or other machines. Disabling/removing a
+profile stops its task and cancels in-flight commands. SSH requests have a
+30-second timeout (local requests use five seconds); disconnected machines retry
+with backoff up to 30 seconds without prompting for authentication. Reconnect
+through Herdr yourself if SSH needs interactive authentication.
+
+Herdr CLI forwarding can establish a fresh SSH transport for each command.
+For a roughly ten-second transport setup, initial synchronization can take
+40 seconds or more because title confirmation and rename are separate requests.
+No remote service, files, hook edits, or installation are used to avoid that
+transport cost.
+
+This covers Herdr's **saved SSH machine connections**, not an arbitrary `ssh`
+command typed inside a local shell pane or a separate standalone Herdr window
+on another computer. Those need their own Herdr agent detection/connection.
 
 ### Lifecycle design
 
@@ -68,7 +106,8 @@ watcher on the next cycle (plus any in-flight CLI timeout). Re-enable and invoke
 the start action for immediate activation; focusing another tab or detecting
 an agent also activates it. Herdr owns process termination when its pane/server
 closes. Failed API calls log an error, discard cached observations, and back off
-from 4 to 30 seconds; five consecutive failures stop the watcher. Fix the cause
+from 4 to 30 seconds; five consecutive local failures stop the watcher. Remote
+failures are isolated and keep retrying. Fix a stopped local watcher's cause
 and invoke the start action to retry.
 
 **Freshness limit:** Herdr provides terminal titles and session IDs separately,
@@ -83,6 +122,8 @@ Herdr 0.9.4's session-replacement allowlist does not include Copilot, so its
 reported `agent_session.value` can remain unchanged on `/resume`. Title changes
 are tracked independently of session IDs and still update the tab. The
 session-switch guard applies whenever Herdr actually reports a changed ID.
+Without a session ID, only terminal identity and stable title changes can be
+checked; a session switch with no observable title change cannot be detected.
 
 ## Manage
 
@@ -103,6 +144,15 @@ If a restored layout retains an old, exited watcher tab, close that tab and
 keep the newly started watcher.
 
 An install pinned with `--ref v0.1.0` stays pinned during `plugin update`.
+To upgrade the original release, stop the old watcher and install the new tag:
+
+```powershell
+herdr plugin disable copilot-auto-title
+herdr plugin install shashank19gaurav/herdr-copilot-auto-title --ref v0.1.1
+herdr plugin enable copilot-auto-title
+herdr plugin action invoke copilot-auto-title.start
+```
+
 To follow the default branch, omit `--ref` when installing. For another release,
 reinstall with that release's `--ref` after reviewing it.
 
@@ -116,21 +166,25 @@ herdr plugin link .
 herdr plugin action invoke copilot-auto-title.start
 ```
 
-No `npm install` or build step is required. Uninstall the GitHub installation
-before linking a local copy with the same ID. Use `herdr plugin unlink
-copilot-auto-title` to unregister a local link without deleting source files.
+No `npm install` or build step is required. Disable an existing watcher before
+linking a local copy with the same ID. Use `herdr plugin unlink copilot-auto-title`
+to unregister a local link without deleting source files.
 
 Tests cover normalization, envelopes, session switches and switch-back, stale
 titles, manual names, deterministic split ownership, workspace isolation,
-idempotence, identity races, command errors, singleton release, backoff, and
-disable/uninstall. CI runs the tests on Windows with Node 20, 22, and 24.
+idempotence, identity races, command errors, singleton release, backoff,
+disable/uninstall, missing remote session IDs, machine-scoped ID collisions,
+offline-machine isolation, and in-flight cancellation. CI runs the tests on
+Windows with Node 20, 22, and 24.
 
 ## Security and privacy
 
 Herdr plugins run as your user and are **not sandboxed**. This plugin needs local
-Herdr access to list plugins, read agent/tab snapshots, open its own pane, and
-rename Copilot tabs. It has no network requests, tokens, telemetry, persisted
-conversation text, or session-file access. It does not read or rewrite Copilot
+Herdr access to list plugins/machines, read agent/tab snapshots, open its own pane,
+and rename Copilot tabs. It uses Herdr's existing SSH connections to manage
+enabled saved machines; disabling a machine profile excludes it. It makes no
+direct network requests and handles no SSH credentials, tokens, telemetry,
+persisted conversation text, or session files. It does not read or rewrite Copilot
 settings/hooks. A short hash of the Herdr socket path names the singleton pipe;
 the pipe accepts no commands. Conversation titles stay in memory and Herdr's
 own tab labels, which Herdr may persist as part of its normal session state.
@@ -140,7 +194,7 @@ own tab labels, which Herdr may persist as part of its normal session state.
 The root `herdr-plugin.toml` and GitHub topic **`herdr-plugin`** make this public
 repository eligible for automatic marketplace indexing (normally within
 30 minutes). A marketplace listing is discovery, not a security review.
-GitHub tags such as `v0.1.0` support reproducible `--ref` installs.
+GitHub tags such as `v0.1.1` support reproducible `--ref` installs.
 
 References: [Plugins](https://herdr.dev/docs/plugins/),
 [Socket API](https://herdr.dev/docs/socket-api/),

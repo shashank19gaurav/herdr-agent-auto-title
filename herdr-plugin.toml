@@ -1,8 +1,8 @@
 id = "copilot-auto-title"
 name = "Copilot Auto-Title"
-version = "0.1.0"
+version = "0.1.1"
 min_herdr_version = "0.9.4"
-description = "Keep Copilot tabs named after their active conversation, including /resume."
+description = "Auto-title local and saved SSH machine Copilot tabs from their active conversation."
 platforms = ["windows"]
 
 [[startup]]

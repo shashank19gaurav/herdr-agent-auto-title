@@ -80,13 +80,27 @@ test('late arrival of the first session ID does not quarantine a valid title', (
   assert.equal(tracker.plan(snapshot())[0].title, 'Fix auth');
 });
 
-test('ignores other agents and sessions without confirmed identity', () => {
+test('ignores other agents and malformed session identities', () => {
   const tracker = new TitleTracker();
-  for (const other of [agent({ agent: 'claude' }), agent({ agent_session: undefined }),
+  for (const other of [agent({ agent: 'claude' }),
     agent({ agent_session: { agent: 'other', kind: 'id', value: 'x' } })]) {
     tracker.plan(snapshot([other]));
     assert.deepEqual(tracker.plan(snapshot([other])), []);
   }
+});
+
+test('supports SSH Copilot without session hooks and follows title changes', () => {
+  const tracker = new TitleTracker();
+  const remote = agent({ agent_session: undefined });
+  assert.deepEqual(tracker.plan(snapshot([remote])), []);
+  const change = tracker.plan(snapshot([remote]))[0];
+  assert.equal(change.title, 'Fix auth');
+  assert.equal(change.sessionId, null);
+  remote.terminal_title_stripped = 'Resumed remote conversation - GitHub Copilot';
+  assert.deepEqual(tracker.plan(snapshot([remote])), []);
+  assert.equal(tracker.plan(snapshot([remote]))[0].title, 'Resumed remote conversation');
+  remote.terminal_title_stripped = 'GitHub Copilot';
+  assert.deepEqual(tracker.plan(snapshot([remote])), []);
 });
 
 test('deterministic split-pane owner does not follow focus or fall back to another pane', () => {

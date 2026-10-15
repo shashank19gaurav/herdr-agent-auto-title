@@ -10,6 +10,14 @@ export function conversationTitle(raw) {
   return title;
 }
 
+export function copilotSessionId(agent) {
+  const session = agent.agent_session;
+  if (session == null) return null;
+  if (session.agent === 'copilot' && session.kind === 'id' &&
+      typeof session.value === 'string' && session.value.trim()) return session.value;
+  return undefined;
+}
+
 export function snapshotFrom(result) {
   const snapshot = result?.snapshot;
   if (!Array.isArray(snapshot?.agents) || !Array.isArray(snapshot?.tabs)) {
@@ -55,9 +63,8 @@ export class TitleTracker {
     for (const agent of agents) {
       if (agent.agent !== 'copilot') continue;
       const tabId = agent.tab_id;
-      const session = agent.agent_session;
-      const sessionId = session?.agent === 'copilot' && session.kind === 'id' &&
-        typeof session.value === 'string' && session.value.trim() ? session.value : null;
+      const sessionId = copilotSessionId(agent);
+      if (sessionId === undefined) continue;
       const title = conversationTitle(agent.terminal_title_stripped);
       let state = this.#panes.get(agent.pane_id);
       if (!state || state.terminal !== agent.terminal_id) {
@@ -73,9 +80,9 @@ export class TitleTracker {
       state.stable = title && title === state.title ? state.stable + 1 : 1;
       state.title = title;
       if (owners.get(tabId) !== agent) continue;
-      if (sessionId && title && !state.stale && state.stable >= 2 &&
+      if (title && !state.stale && state.stable >= 2 &&
           labels.has(tabId) && labels.get(tabId) !== title) {
-        changes.push({ tabId, title, paneId: agent.pane_id, sessionId });
+        changes.push({ tabId, title, paneId: agent.pane_id, terminalId: agent.terminal_id, sessionId });
       }
     }
     return changes;

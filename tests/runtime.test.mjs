@@ -98,3 +98,26 @@ test('disable/uninstall exits watcher and releases singleton', async () => {
   await watch(async () => ({ plugins: [] }), pipe, { log: { log() {} } });
   assert.equal(await watcherRunning(pipe), false);
 });
+
+test('optional session identity still rechecks terminal identity before writing', async () => {
+  const remote = { ...agent, agent_session: undefined };
+  const tracker = new TitleTracker();
+  let current = remote;
+  const renames = [];
+  const api = async args => {
+    if (args[0] === 'plugin') return plugins(true);
+    if (args[0] === 'api') return { snapshot: { ...snapshot.snapshot, agents: [remote] } };
+    if (args[0] === 'agent') return { agent: current };
+    renames.push(args);
+    return {};
+  };
+  await tick(api, tracker);
+  await tick(api, tracker);
+  assert.equal(renames.length, 1);
+  current = { ...remote, terminal_id: 'replacement' };
+  await tick(api, tracker);
+  assert.equal(renames.length, 1);
+  const controller = new AbortController();
+  controller.abort();
+  assert.equal(await tick(api, tracker, { signal: controller.signal }), false);
+});

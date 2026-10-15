@@ -4,14 +4,15 @@ import net from 'node:net';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
-import { conversationTitle, snapshotFrom, TitleTracker } from './titles.mjs';
+import { conversationTitle, copilotSessionId, snapshotFrom, TitleTracker } from './titles.mjs';
 
 export const PLUGIN_ID = 'copilot-auto-title';
 const execute = promisify(execFile);
 const POLL_MS = 2000;
 
-export function decodeResponse(stdout) {
+export function decodeResponse(stdout, { array = false } = {}) {
   const response = JSON.parse(stdout);
+  if (array && Array.isArray(response)) return response;
   if (response?.error) throw new Error(`Herdr ${response.error.code}: ${response.error.message}`);
   if (!response?.result || typeof response.result !== 'object') {
     throw new Error('Herdr returned no result');
@@ -19,12 +20,12 @@ export function decodeResponse(stdout) {
   return response.result;
 }
 
-export async function herdr(args) {
+export async function herdr(args, { signal, timeout = 5000 } = {}) {
   try {
     const { stdout } = await execute(process.env.HERDR_BIN_PATH || 'herdr', args, {
-      encoding: 'utf8', timeout: 5000, maxBuffer: 4 * 1024 * 1024, windowsHide: true,
+      encoding: 'utf8', timeout, signal, maxBuffer: 4 * 1024 * 1024, windowsHide: true,
     });
-    return decodeResponse(stdout);
+    return decodeResponse(stdout, { array: args[0] === 'machine' && args[1] === 'list' });
   } catch (error) {
     // Never print child output: it can contain private tab titles or paths.
     if (error.code || error.killed) {
@@ -77,27 +78,80 @@ export async function start(api, address) {
     '--entrypoint', 'watcher', '--placement', 'tab', '--no-focus']);
 }
 
-export async function tick(api, tracker) {
-  if (!await pluginEnabled(api)) return false;
+export async function tick(api, tracker, { enabledApi = api, signal } = {}) {
+  if (signal?.aborted || !await pluginEnabled(enabledApi)) return false;
   const snapshot = snapshotFrom(await api(['api', 'snapshot']));
   for (const change of tracker.plan(snapshot)) {
     // Recheck identity immediately before writing; /resume can race the snapshot.
     const result = await api(['agent', 'get', change.paneId]);
     const current = result.agent;
     if (current?.agent !== 'copilot' || current.tab_id !== change.tabId ||
-        current.agent_session?.value !== change.sessionId ||
+        current.terminal_id !== change.terminalId ||
+        copilotSessionId(current) !== change.sessionId ||
         conversationTitle(current.terminal_title_stripped) !== change.title) continue;
-    if (!await pluginEnabled(api)) return false;
+    if (signal?.aborted || !await pluginEnabled(enabledApi)) return false;
+    if (signal?.aborted) return false;
     await api(['tab', 'rename', change.tabId, change.title]);
     console.log(`Updated Copilot tab ${change.tabId}`);
   }
   return true;
 }
 
+async function watchMachine(api, id, { signal, sleep, log }) {
+  const tracker = new TitleTracker();
+  const remoteApi = args => api(['--machine', id, ...args], { signal, timeout: 30000 });
+  let failures = 0;
+  while (!signal.aborted) {
+    try {
+      if (!await tick(remoteApi, tracker, { enabledApi: api, signal })) break;
+      if (failures) log.log(`SSH machine ${id} auto-title connection recovered.`);
+      failures = 0;
+    } catch (error) {
+      if (signal.aborted) break;
+      tracker.reset();
+      failures = Math.min(failures + 1, 4);
+      log.error(`SSH machine ${id} refresh failed: ${error.message}. Retrying with backoff.`);
+    }
+    try {
+      await sleep(Math.min(POLL_MS * 2 ** failures, 30000), undefined, { signal });
+    } catch (error) {
+      if (error.name !== 'AbortError') throw error;
+    }
+  }
+}
+
+export async function syncMachines(api, remotes, { sleep = delay, log = console } = {}) {
+  const machines = await api(['machine', 'list', '--json']);
+  if (!Array.isArray(machines) || machines.some(machine =>
+    typeof machine?.id !== 'string' || typeof machine.enabled !== 'boolean')) {
+    throw new Error('Herdr machine list must contain machine IDs and enabled flags');
+  }
+  const enabled = new Map(machines.filter(machine => machine.enabled).map(machine =>
+    [machine.id, JSON.stringify([machine.target, machine.session])]));
+  for (const [id, remote] of remotes) {
+    if (enabled.get(id) !== remote.identity) {
+      remote.controller.abort();
+      await remote.task;
+      remotes.delete(id);
+    }
+  }
+  for (const [id, identity] of enabled) {
+    if (remotes.has(id)) continue;
+    const controller = new AbortController();
+    const remote = { identity, controller };
+    remotes.set(id, remote);
+    remote.task = watchMachine(api, id, { signal: controller.signal, sleep, log }).catch(error => {
+      log.error(`SSH machine ${id} watcher stopped: ${error.message}`);
+      if (remotes.get(id) === remote) remotes.delete(id);
+    });
+  }
+}
+
 export async function watch(api, address, { signal, sleep = delay, log = console } = {}) {
   const lock = await acquireLock(address);
   if (!lock) return;
   const tracker = new TitleTracker();
+  const remotes = new Map();
   let failures = 0;
   log.log('Copilot Auto-Title running. All Copilot tabs are managed; no conversation text is logged.');
   try {
@@ -111,6 +165,13 @@ export async function watch(api, address, { signal, sleep = delay, log = console
         log.error(`Auto-title refresh failed: ${error.message}. Attempt ${failures}/5.`);
         if (failures >= 5) throw new Error('Herdr unavailable after five attempts; watcher stopped');
       }
+      if (!failures) {
+        try {
+          await syncMachines(api, remotes, { sleep, log });
+        } catch (error) {
+          log.error(`SSH machine discovery failed: ${error.message}. Retrying next cycle.`);
+        }
+      }
       try {
         await sleep(Math.min(POLL_MS * 2 ** failures, 30000), undefined, { signal });
       } catch (error) {
@@ -118,6 +179,8 @@ export async function watch(api, address, { signal, sleep = delay, log = console
       }
     }
   } finally {
+    for (const remote of remotes.values()) remote.controller.abort();
+    await Promise.all([...remotes.values()].map(remote => remote.task));
     await new Promise(resolve => lock.close(resolve));
     log.log('Copilot Auto-Title stopped.');
   }
