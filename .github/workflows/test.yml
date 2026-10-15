@@ -1,0 +1,25 @@
+name: Test
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm test
+      - name: Check release metadata
+        shell: python
+        run: |
+          import json, pathlib, tomllib
+          manifest = tomllib.loads(pathlib.Path("herdr-plugin.toml").read_text())
+          package = json.loads(pathlib.Path("package.json").read_text())
+          assert manifest["version"] == package["version"]
+          assert manifest["platforms"] == ["windows"]
+          assert manifest["min_herdr_version"] == "0.9.4"
