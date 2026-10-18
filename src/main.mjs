@@ -90,7 +90,6 @@ export async function tick(api, tracker, { enabledApi = api, signal } = {}) {
         copilotSessionId(current) !== change.sessionId ||
         conversationTitle(current.terminal_title_stripped) !== change.title) continue;
     if (signal?.aborted || !await pluginEnabled(enabledApi)) return false;
-    if (signal?.aborted) return false;
     await api(['tab', 'rename', change.tabId, change.title]);
     console.log(`Updated Copilot tab ${change.tabId}`);
   }
