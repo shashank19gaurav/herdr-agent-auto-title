@@ -10,9 +10,9 @@ installed [Pi Auto-Name extension](extensions/pi-auto-name/README.md) can genera
 one using pi's selected model. **That extension adds a model request and its
 normal provider cost/data handling; it is not enabled by installing this watcher.**
 
-The package/project name is now `herdr-agent-auto-title`. The installed plugin
-ID remains **`copilot-auto-title`** for compatibility. Repository URLs below
-intentionally use the existing repository until its separate rename is complete.
+The repository/package name is **`herdr-agent-auto-title`** (formerly
+`herdr-copilot-auto-title`). The installed plugin ID remains
+**`copilot-auto-title`** for upgrade compatibility.
 
 ## Install
 
@@ -21,14 +21,13 @@ A supported agent must be recognized by Herdr and emit its supported native
 terminal title. For Copilot, install its Herdr integration for session-ID
 tracking where supported. Pi does not require an additional extension.
 
-**Release status:** these are the commands for the planned `v0.2.0` release;
-the tag must be published before they work. To try an unpublished checkout,
-use [Local development](#local-development).
+Install the **v0.2.0** release below, or use
+[Local development](#local-development) to run a checkout.
 
 ```powershell
 # For Copilot session-ID tracking where supported:
 herdr integration install copilot
-herdr plugin install shashank19gaurav/herdr-copilot-auto-title --ref v0.2.0
+herdr plugin install shashank19gaurav/herdr-agent-auto-title --ref v0.2.0
 herdr plugin action invoke copilot-auto-title.start
 ```
 
@@ -101,8 +100,9 @@ Live read-only checks during planning found Herdr 0.9.4 detecting `agent: "pi"`
 with cwd/title but no `agent_session`. The Herdr pi integration is not required
 or verified here; when a valid pi session ID is supplied it strengthens switch
 tracking. Without one, stable title and terminal/cwd changes are the only
-observable signals. Named transitions and remote pi still require the release
-smoke tests below; fixtures are not an end-to-end compatibility claim.
+observable signals. Live validation covered local pi 1.3.0 naming/session
+transitions in regular/fullscreen modes and a saved-SSH pi 1.2.0 rename.
+See [v0.2.0 validation and limitations](docs/releases/v0.2.0.md).
 
 Version evidence: pi's shipped `dist/modes/interactive/interactive-mode.js`
 (`updateTerminalTitle`), `dist/config.js` (`APP_TITLE`), and its
@@ -206,27 +206,28 @@ singleton pipe namespace is also retained so old and new code cannot race.
 There is no second plugin ID to install alongside it.
 
 An install pinned with `--ref v0.1.0` or `--ref v0.1.1` stays pinned during
-`plugin update`. Once `v0.2.0` is published, disable the old watcher, wait for
-it to stop (or close its pane), then install the new tag:
+`plugin update`. To upgrade to `v0.2.0`, disable the old watcher, wait for
+it to stop (or close its pane), then install from the renamed repository:
 
 ```powershell
 herdr plugin disable copilot-auto-title
-herdr plugin install shashank19gaurav/herdr-copilot-auto-title --ref v0.2.0
+herdr plugin install shashank19gaurav/herdr-agent-auto-title --ref v0.2.0
 herdr plugin enable copilot-auto-title
 herdr plugin action invoke copilot-auto-title.start
 ```
 
 To follow the default branch, omit `--ref` when installing. For another release,
 reinstall with that release's `--ref` after reviewing it. Old tags should remain
-available. Renaming the GitHub repository is a separate release task: verify
-fresh installs, pinned installs, and updates before changing these URLs; do not
-assume Herdr aliases or GitHub redirects provide an in-place migration.
+available under the renamed repository. Use the new repository source explicitly
+when upgrading; do not rely on old saved install URLs or redirects for in-place
+migration. The plugin ID has not changed, so do not install a second plugin ID.
+Existing local links remain valid and do not need their directories renamed.
 
 ## Local development
 
 ```powershell
-git clone https://github.com/shashank19gaurav/herdr-copilot-auto-title.git
-Set-Location herdr-copilot-auto-title
+git clone https://github.com/shashank19gaurav/herdr-agent-auto-title.git
+Set-Location herdr-agent-auto-title
 npm test
 herdr plugin link .
 herdr plugin action invoke copilot-auto-title.start
@@ -269,16 +270,11 @@ repository eligible for automatic marketplace indexing (normally within
 30 minutes). A marketplace listing is discovery, not a security review.
 GitHub tags such as `v0.2.0` support reproducible `--ref` installs.
 
-Before publishing 0.2.0:
-
-- Run tests/metadata checks on the Windows Node 20/22/24 matrix.
-- Smoke-test pi `/name`, `/resume`, `/new`, fork/clone, and both regular and
-  fullscreen terminal modes on pi's supported runtime.
-- Exercise mixed Copilot/pi split tabs, owner removal/loading, saved SSH pi,
-  reconnect, disable/re-enable, and upgrade from v0.1.1.
-- Confirm unsupported tabs never change and conversation text is not logged.
-- Validate repository rename/install/update behavior separately. This patch
-  does not rename the remote repository, move a checkout, or publish a tag.
+For release validation results and remaining live-test gaps, see
+[v0.2.0 release notes](docs/releases/v0.2.0.md). Future releases should run the
+Windows Node 20/22/24 matrix and repeat local/SSH transition, split ownership,
+lifecycle, and installation/upgrade checks. Keep historical tags and the legacy
+plugin/singleton identifiers intact unless an explicit migration is provided.
 
 References: [Plugins](https://herdr.dev/docs/plugins/),
 [Socket API](https://herdr.dev/docs/socket-api/),

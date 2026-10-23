@@ -26,9 +26,11 @@ pi -e ./extensions/pi-auto-name/index.js
 Install the local package for future pi sessions:
 
 ```powershell
-pi install C:/dev/herdr-copilot-auto-title/extensions/pi-auto-name
+pi install C:/dev/herdr-agent-auto-title/extensions/pi-auto-name
 ```
 
+Replace the example path with your actual checkout path. Existing checkouts
+named `herdr-copilot-auto-title` continue to work without moving them.
 This references the checkout without copying it. Keep that directory in place.
 Use `pi install --local <path>` for project scope instead of personal scope;
 project configuration is loaded only after pi's project-trust decision. Review
@@ -136,7 +138,7 @@ pi -e ./extensions/pi-auto-name/index.js --auto-name-disabled
 For persistent resource control use `pi config`, or remove the package:
 
 ```powershell
-pi remove C:/dev/herdr-copilot-auto-title/extensions/pi-auto-name
+pi remove C:/dev/herdr-agent-auto-title/extensions/pi-auto-name
 ```
 
 Use `--local` when removing a project-scoped install. Reload or restart pi after
