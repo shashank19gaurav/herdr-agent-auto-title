@@ -1,8 +1,8 @@
 {
-  "name": "herdr-copilot-auto-title",
-  "version": "0.1.1",
+  "name": "herdr-agent-auto-title",
+  "version": "0.2.0",
   "private": true,
-  "description": "Windows-native Herdr plugin for Copilot conversation tab titles",
+  "description": "Windows-native Herdr plugin for Copilot and pi session tab titles",
   "type": "module",
   "engines": { "node": ">=20" },
   "scripts": { "test": "node --test" },

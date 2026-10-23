@@ -4,8 +4,10 @@ import net from 'node:net';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
-import { conversationTitle, copilotSessionId, snapshotFrom, TitleTracker } from './titles.mjs';
+import { adapterFor } from './adapters/index.mjs';
+import { completeIdentity, snapshotFrom, TitleTracker } from './titles.mjs';
 
+// Compatibility ID: keep existing installations/actions and singleton ownership.
 export const PLUGIN_ID = 'copilot-auto-title';
 const execute = promisify(execFile);
 const POLL_MS = 2000;
@@ -37,6 +39,7 @@ export async function herdr(args, { signal, timeout = 5000 } = {}) {
 
 export function lockAddress(socketPath) {
   const key = createHash('sha256').update(socketPath.toLowerCase()).digest('hex').slice(0, 24);
+  // Deliberately shared with v0.1.x so old and new watchers cannot race.
   return `\\\\.\\pipe\\herdr-copilot-auto-title-${key}`;
 }
 
@@ -85,14 +88,16 @@ export async function tick(api, tracker, { enabledApi = api, signal } = {}) {
     // Recheck identity immediately before writing; /resume can race the snapshot.
     const result = await api(['agent', 'get', change.paneId]);
     const current = result.agent;
-    if (current?.agent !== 'copilot' || current.tab_id !== change.tabId ||
-        current.terminal_id !== change.terminalId ||
-        copilotSessionId(current) !== change.sessionId ||
-        conversationTitle(current.terminal_title_stripped) !== change.title) continue;
+    if (!completeIdentity(current) || current.agent !== change.harness ||
+        current.pane_id !== change.paneId || current.tab_id !== change.tabId ||
+        current.terminal_id !== change.terminalId) continue;
+    const observation = adapterFor(change.harness)?.read(current);
+    if (!observation || observation.sessionId !== change.sessionId ||
+        observation.title !== change.title || observation.context !== change.context) continue;
     if (signal?.aborted || !await pluginEnabled(enabledApi)) return false;
     if (signal?.aborted) return false;
     await api(['tab', 'rename', change.tabId, change.title]);
-    console.log(`Updated Copilot tab ${change.tabId}`);
+    console.log(`Updated agent tab ${change.tabId}`);
   }
   return true;
 }
@@ -153,7 +158,7 @@ export async function watch(api, address, { signal, sleep = delay, log = console
   const tracker = new TitleTracker();
   const remotes = new Map();
   let failures = 0;
-  log.log('Copilot Auto-Title running. All Copilot tabs are managed; no conversation text is logged.');
+  log.log('Herdr Agent Auto-Title running. Supported agent tabs are managed; no conversation text is logged.');
   try {
     while (!signal?.aborted) {
       try {
@@ -182,7 +187,7 @@ export async function watch(api, address, { signal, sleep = delay, log = console
     for (const remote of remotes.values()) remote.controller.abort();
     await Promise.all([...remotes.values()].map(remote => remote.task));
     await new Promise(resolve => lock.close(resolve));
-    log.log('Copilot Auto-Title stopped.');
+    log.log('Herdr Agent Auto-Title stopped.');
   }
 }
 
@@ -197,7 +202,7 @@ async function main() {
   if (process.env.HERDR_PLUGIN_ENTRYPOINT_ID !== 'watcher' || !process.env.HERDR_TAB_ID) {
     throw new Error('The watcher must run in its Herdr-owned plugin pane');
   }
-  await herdr(['tab', 'rename', process.env.HERDR_TAB_ID, 'Copilot Auto-Title']);
+  await herdr(['tab', 'rename', process.env.HERDR_TAB_ID, 'Herdr Agent Auto-Title']);
   const controller = new AbortController();
   const stop = () => controller.abort();
   process.once('SIGINT', stop);
@@ -212,7 +217,7 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(error => {
-    console.error(`Copilot Auto-Title: ${error.message}`);
+    console.error(`Herdr Agent Auto-Title: ${error.message}`);
     process.exitCode = 1;
   });
 }

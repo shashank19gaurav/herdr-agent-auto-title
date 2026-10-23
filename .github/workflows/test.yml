@@ -20,6 +20,22 @@ jobs:
           import json, pathlib, tomllib
           manifest = tomllib.loads(pathlib.Path("herdr-plugin.toml").read_text())
           package = json.loads(pathlib.Path("package.json").read_text())
-          assert manifest["version"] == package["version"]
+          assert manifest["version"] == package["version"] == "0.2.0"
+          assert package["name"] == "herdr-agent-auto-title"
+          assert manifest["name"] == "Herdr Agent Auto-Title"
+          # Compatibility identifiers deliberately survive the branding change.
+          assert manifest["id"] == "copilot-auto-title"
+          assert manifest["actions"][0]["id"] == "start"
+          assert manifest["panes"][0]["id"] == "watcher"
           assert manifest["platforms"] == ["windows"]
           assert manifest["min_herdr_version"] == "0.9.4"
+          # Optional pi package is independent; never add pi dependencies to the watcher.
+          extension_root = pathlib.Path("extensions/pi-auto-name")
+          extension = json.loads((extension_root / "package.json").read_text())
+          assert extension["name"] == "herdr-pi-auto-name"
+          assert extension["engines"]["node"] == ">=22.19.0"
+          assert extension["pi"]["extensions"] == ["./index.js"]
+          assert not package.get("dependencies") and not extension.get("dependencies")
+          assert extension["peerDependencies"]["@earendil-works/pi-coding-agent"] == "*"
+          for entry in extension["files"]:
+              assert (extension_root / entry).is_file(), entry

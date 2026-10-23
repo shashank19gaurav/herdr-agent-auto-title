@@ -1,8 +1,8 @@
 id = "copilot-auto-title"
-name = "Copilot Auto-Title"
-version = "0.1.1"
+name = "Herdr Agent Auto-Title"
+version = "0.2.0"
 min_herdr_version = "0.9.4"
-description = "Auto-title local and saved SSH machine Copilot tabs from their active conversation."
+description = "Sync local and saved SSH machine Copilot and pi tab titles from their active session names."
 platforms = ["windows"]
 
 [[startup]]
@@ -22,12 +22,12 @@ command = ["node", "src/main.mjs", "start"]
 
 [[actions]]
 id = "start"
-title = "Start Copilot auto-title"
+title = "Start agent auto-title"
 contexts = ["global"]
 command = ["node", "src/main.mjs", "start"]
 
 [[panes]]
 id = "watcher"
-title = "Copilot Auto-Title"
+title = "Herdr Agent Auto-Title"
 placement = "tab"
 command = ["node", "src/main.mjs", "watch"]

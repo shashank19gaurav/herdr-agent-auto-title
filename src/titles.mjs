@@ -1,21 +1,8 @@
-const SUFFIX = ' - GitHub Copilot';
-const GENERIC = /^(?:github copilot(?: cli)?|copilot(?: cli)?|new (?:chat|conversation|session)|untitled(?: (?:chat|conversation|session))?|loading[.\u2026]*|resuming[.\u2026]*)$/i;
+import { adapterFor } from './adapters/index.mjs';
 
-export function conversationTitle(raw) {
-  if (typeof raw !== 'string') return null;
-  let title = raw.trim();
-  if (title === SUFFIX.trim()) return null;
-  if (title.endsWith(SUFFIX)) title = title.slice(0, -SUFFIX.length).trim();
-  if (!title || GENERIC.test(title) || /[\x00-\x1f\x7f]/.test(title)) return null;
-  return title;
-}
-
-export function copilotSessionId(agent) {
-  const session = agent.agent_session;
-  if (session == null) return null;
-  if (session.agent === 'copilot' && session.kind === 'id' &&
-      typeof session.value === 'string' && session.value.trim()) return session.value;
-  return undefined;
+export function completeIdentity(agent) {
+  return [agent?.pane_id, agent?.tab_id, agent?.terminal_id]
+    .every(value => typeof value === 'string' && value.trim());
 }
 
 export function snapshotFrom(result) {
@@ -24,10 +11,8 @@ export function snapshotFrom(result) {
     throw new Error('Herdr snapshot must contain agents and tabs arrays');
   }
   for (const agent of snapshot.agents) {
-    if (agent?.agent === 'copilot' &&
-        (typeof agent.pane_id !== 'string' || typeof agent.tab_id !== 'string' ||
-         typeof agent.terminal_id !== 'string')) {
-      throw new Error('Copilot agent is missing pane, tab, or terminal identity');
+    if (adapterFor(agent?.agent) && !completeIdentity(agent)) {
+      throw new Error('Supported agent is missing pane, tab, or terminal identity');
     }
   }
   for (const tab of snapshot.tabs) {
@@ -46,10 +31,10 @@ export class TitleTracker {
   }
 
   plan({ agents, tabs }) {
+    const supported = agents.filter(agent => adapterFor(agent?.agent) && completeIdentity(agent));
     const owners = new Map();
     const live = new Set();
-    for (const agent of agents) {
-      if (agent.agent !== 'copilot') continue;
+    for (const agent of supported) {
       live.add(agent.pane_id);
       const owner = owners.get(agent.tab_id);
       if (!owner || agent.pane_id < owner.pane_id) owners.set(agent.tab_id, agent);
@@ -60,15 +45,20 @@ export class TitleTracker {
 
     const labels = new Map(tabs.map(tab => [tab.tab_id, tab.label]));
     const changes = [];
-    for (const agent of agents) {
-      if (agent.agent !== 'copilot') continue;
-      const tabId = agent.tab_id;
-      const sessionId = copilotSessionId(agent);
-      if (sessionId === undefined) continue;
-      const title = conversationTitle(agent.terminal_title_stripped);
+    for (const agent of supported) {
+      const observation = adapterFor(agent.agent).read(agent);
       let state = this.#panes.get(agent.pane_id);
-      if (!state || state.terminal !== agent.terminal_id) {
-        state = { terminal: agent.terminal_id, sessionId, title: null, stale: null, stable: 0 };
+      if (!observation) {
+        // Invalid identity is not an unnamed/loading session. Break stability
+        // without losing the last known session needed for stale-title quarantine.
+        if (state) state.stable = 0;
+        continue;
+      }
+      const { title, sessionId, context } = observation;
+      if (!state || state.terminal !== agent.terminal_id || state.harness !== agent.agent ||
+          state.context !== context) {
+        state = { harness: agent.agent, terminal: agent.terminal_id, context,
+          sessionId, title: null, stale: null, stable: 0 };
         this.#panes.set(agent.pane_id, state);
       } else if (state.sessionId !== sessionId) {
         // A new session can briefly retain the previous session's OSC title.
@@ -79,10 +69,11 @@ export class TitleTracker {
       if (!title || title !== state.stale) state.stale = null;
       state.stable = title && title === state.title ? state.stable + 1 : 1;
       state.title = title;
-      if (owners.get(tabId) !== agent) continue;
+      if (owners.get(agent.tab_id) !== agent) continue;
       if (title && !state.stale && state.stable >= 2 &&
-          labels.has(tabId) && labels.get(tabId) !== title) {
-        changes.push({ tabId, title, paneId: agent.pane_id, terminalId: agent.terminal_id, sessionId });
+          labels.has(agent.tab_id) && labels.get(agent.tab_id) !== title) {
+        changes.push({ tabId: agent.tab_id, title, paneId: agent.pane_id,
+          terminalId: agent.terminal_id, harness: agent.agent, sessionId, context });
       }
     }
     return changes;

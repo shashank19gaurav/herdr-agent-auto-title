@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { conversationTitle, snapshotFrom, TitleTracker } from '../src/titles.mjs';
+import { conversationTitle } from '../src/adapters/copilot.mjs';
+import { snapshotFrom, TitleTracker } from '../src/titles.mjs';
 import { decodeResponse } from '../src/main.mjs';
 
 const agent = (overrides = {}) => ({

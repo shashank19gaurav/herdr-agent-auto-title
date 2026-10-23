@@ -124,3 +124,38 @@ test('offline SSH backs off without preventing other machines from renaming', as
     assert.equal(remotes.size, 2);
   } finally { await stop(remotes); }
 });
+
+test('pi local and SSH title/cwd state stay isolated with the same pane and terminal IDs', async () => {
+  const calls = [];
+  const api = async args => {
+    calls.push(args);
+    const remote = args[0] === '--machine';
+    const command = remote ? args.slice(2) : args;
+    if (command[0] === 'plugin') {
+      assert.equal(remote, false);
+      return plugin;
+    }
+    const data = snapshot('unused');
+    data.snapshot.agents[0] = {
+      ...data.snapshot.agents[0], agent: 'pi',
+      cwd: remote ? '/remote/project' : 'C:\\local\\project',
+      terminal_title_stripped: `π - ${remote ? 'Remote pi' : 'Local pi'} - project`,
+    };
+    if (command[0] === 'api') return data;
+    if (command[0] === 'agent') return { agent: data.snapshot.agents[0] };
+    return {};
+  };
+  const local = new TitleTracker();
+  const remote = new TitleTracker();
+  const remoteApi = args => api(['--machine', 'ssh-pi', ...args]);
+  await tick(api, local);
+  await tick(remoteApi, remote, { enabledApi: api });
+  await tick(api, local);
+  await tick(remoteApi, remote, { enabledApi: api });
+  assert.deepEqual(calls.filter(args => args[0] === 'tab'), [
+    ['tab', 'rename', 'w1:t1', 'Local pi'],
+  ]);
+  assert.deepEqual(calls.filter(args => args[0] === '--machine' && args[2] === 'tab'), [
+    ['--machine', 'ssh-pi', 'tab', 'rename', 'w1:t1', 'Remote pi'],
+  ]);
+});

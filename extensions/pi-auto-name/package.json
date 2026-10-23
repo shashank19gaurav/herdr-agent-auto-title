@@ -1,0 +1,12 @@
+{
+  "name": "herdr-pi-auto-name",
+  "version": "0.1.0",
+  "description": "Optional pi extension that names unnamed sessions after a completed exchange",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package"],
+  "engines": { "node": ">=22.19.0" },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },
+  "files": ["index.js", "core.mjs", "README.md", "LICENSE"],
+  "pi": { "extensions": ["./index.js"] }
+}
